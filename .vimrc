@@ -24,8 +24,8 @@ for s:extra_bin in [
       \ s:dart_sdk . '/bin',
       \ s:flutter_sdk . '/bin',
       \ '/snap/bin',
-      \ expand('~/go/bin'),
-      \ expand('~/.pub-cache/bin')
+      \ expand('~/.pub-cache/bin'),
+      \ expand('/usr/bin'),
       \ ]
   if isdirectory(s:extra_bin) && stridx(':' . $PATH . ':', ':' . s:extra_bin . ':') < 0
     let $PATH = s:extra_bin . ':' . $PATH
@@ -68,6 +68,7 @@ Plug 'junegunn/fzf.vim'
 Plug 'preservim/nerdtree'
 Plug 'preservim/tagbar'
 Plug 'rust-lang/rust.vim'
+Plug 'fatih/vim-go', { 'do': ':GoInstallBinaries' }
 
 " Flutter / Dart サポート
 Plug 'dart-lang/dart-vim-plugin'
@@ -111,7 +112,7 @@ filetype plugin indent on
 syntax enable
 
 " =================================================================
-" 3. TrueColor & 黒背景に映えるグリーン基調・RustRover風ハイライト
+" 3. TrueColor & 黒背景に映えるグリーン基調
 " =================================================================
 if has('termguicolors')
   if !has('gui_running') && !has('win32')
@@ -306,20 +307,6 @@ inoremap <silent> <Esc>[O <Nop>
 cnoremap <silent> <Esc>[I <Nop>
 cnoremap <silent> <Esc>[O <Nop>
 
-if !has('gui_running')
-  execute "set <S-Up>=\e[1;2A"
-  execute "set <S-Down>=\e[1;2B"
-  execute "set <S-Right>=\e[1;2C"
-  execute "set <S-Left>=\e[1;2D"
-  execute "set <S-Home>=\e[1;2H"
-  execute "set <S-End>=\e[1;2F"
-  execute "set <M-.>=\e."
-  execute "set <M-,>=\e,"
-  execute "set <M-i>=\ei"
-  execute "set <M-n>=\en"
-  execute "set <M-p>=\ep"
-  execute "set <M-h>=\eh"
-endif
 set selectmode=key
 set keymodel=startsel,stopsel
 
@@ -809,6 +796,7 @@ snoremap <silent><expr> <S-Tab> vsnip#jumpable(-1) ? "\<Plug>(vsnip-jump-prev)" 
 inoremap <silent><expr> <CR>    pumvisible() ? (complete_info(['selected']).selected != -1 ? "\<C-y>" : "\<C-e>\<CR>") : lexima#expand('<LT>CR>', 'i')
 inoremap <silent><expr> <C-n>   pumvisible() ? "\<Down>" : "\<C-n>"
 inoremap <silent><expr> <C-p>   pumvisible() ? "\<Up>" : "\<C-p>"
+inoremap <silent> <C-/> <C-x><C-o>
 
 " =================================================================
 " 11. LSP & スマートジャンプ (Rust / Go / Flutter(Dart) / Java / C++ / Python)
@@ -832,6 +820,7 @@ nnoremap <silent> <C-c>fh :<C-u>FlutterHotReload<CR>
 nnoremap <silent> <C-c>fR :<C-u>FlutterHotRestart<CR>
 nnoremap <silent> <C-c>fq :<C-u>FlutterQuit<CR>
 nnoremap <silent> <C-c>fd :<C-u>FlutterDevices<CR>
+inoremap <silent> <C-@> <C-x><C-o>
 
 let g:lsp_diagnostics_enabled = 1
 let g:lsp_diagnostics_echo_cursor = 1
@@ -1096,6 +1085,9 @@ augroup MyVimrc
   autocmd QuickfixCmdPost vimgrep,grep copen
   autocmd FileType qf,help,ref-*,lsp-hover nnoremap <buffer> <silent> q :<C-u>close<CR>
   autocmd BufEnter ==Translate==\ Excite nnoremap <buffer> <silent> q :<C-u>close<CR>
+  " 新規ファイル作成時の定型文（スケルトン）自動挿入
+  autocmd BufNewFile *.py call setline(1, ['#!/usr/bin/env python3', '# -*- coding: utf-8 -*-', '', '']) | normal! G
+  autocmd BufNewFile *.sh call setline(1, ['#!/usr/bin/env bash', 'set -euo pipefail', '', '']) | normal! G
 
   autocmd BufReadPost *
     \ if line("'\"") > 0 && line("'\"") <= line("$") |
