@@ -1054,7 +1054,7 @@ function! s:configure_lsp() abort
   nnoremap <buffer> <silent> <M-o>   <C-o>zz
   nnoremap <buffer> <silent> <Esc>o  <C-o>zz
   nnoremap <buffer> gd :<C-u>LspDefinition<CR>
-  " ... (以降のLSPキーバインドはそのまま) ...
+  nnoremap <buffer> <silent> <C-q> :<C-u>call <SID>lsp_toggle_help()<CR>
 endfunction
 
 augroup MyLsp
