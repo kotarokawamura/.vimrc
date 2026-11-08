@@ -9,6 +9,29 @@ if &shell =~# 'fi\(z\)\?sh' && executable('/bin/sh')
   set shellredir=>%s\ 2>&1
 endif
 
+" Flutter / Dart (Snap版) / Go のパス設定
+let s:flutter_sdk = '/home/kotaro/snap/flutter/common/flutter'
+let s:dart_sdk = s:flutter_sdk . '/bin/cache/dart-sdk'
+
+if isdirectory(s:flutter_sdk)
+  let $FLUTTER_ROOT = s:flutter_sdk
+endif
+if isdirectory(s:dart_sdk)
+  let $DART_SDK = s:dart_sdk
+endif
+
+for s:extra_bin in [
+      \ s:dart_sdk . '/bin',
+      \ s:flutter_sdk . '/bin',
+      \ '/snap/bin',
+      \ expand('~/go/bin'),
+      \ expand('~/.pub-cache/bin')
+      \ ]
+  if isdirectory(s:extra_bin) && stridx(':' . $PATH . ':', ':' . s:extra_bin . ':') < 0
+    let $PATH = s:extra_bin . ':' . $PATH
+  endif
+endfor
+
 set encoding=utf-8
 set fileencodings=utf-8,euc-jp,sjis,cp932,iso-2022-jp
 set fileformats=unix,dos,mac
@@ -20,7 +43,7 @@ set nowritebackup
 set nobackup
 set noswapfile
 set backspace=indent,eol,start
-set updatetime=100 " LSP応答・GitGutter・単語ハイライトを高速化 (0.1秒)
+set updatetime=128 " LSP応答・GitGutter・単語ハイライトを高速化 (0.1秒)
 set timeoutlen=500
 set ttimeoutlen=10 " EscやAltキーの待ち時間を極小化
 set synmaxcol=300  " 長い行での描画遅延を防止
@@ -45,6 +68,10 @@ Plug 'junegunn/fzf.vim'
 Plug 'preservim/nerdtree'
 Plug 'preservim/tagbar'
 Plug 'rust-lang/rust.vim'
+
+" Flutter / Dart サポート
+Plug 'dart-lang/dart-vim-plugin'
+Plug 'thosakwe/vim-flutter'
 
 " LSP & 自動補完 (vim-lsp + asyncomplete + fzf連携)
 Plug 'prabirshrestha/async.vim'
@@ -73,7 +100,6 @@ Plug 'mfumi/ref-dicts-en'
 Plug 'tyru/vim-altercmd'
 Plug 'mattn/webapi-vim'
 Plug 'skanehira/translate.vim'
-Plug 'miyakogi/vim-dartanalyzer'
 
 " Git操作・ログ閲覧・Blameポップアップ
 Plug 'tpope/vim-fugitive'
@@ -288,6 +314,7 @@ if !has('gui_running')
   execute "set <S-Home>=\e[1;2H"
   execute "set <S-End>=\e[1;2F"
   execute "set <M-.>=\e."
+  execute "set <M-,>=\e,"
   execute "set <M-i>=\ei"
   execute "set <M-n>=\en"
   execute "set <M-p>=\ep"
@@ -299,8 +326,9 @@ set keymodel=startsel,stopsel
 set shiftwidth=2 tabstop=2 softtabstop=2 expandtab autoindent smartindent
 augroup FileTypeIndent
   autocmd!
-  autocmd FileType c,cpp,rust,python,php setlocal shiftwidth=4 tabstop=4 softtabstop=4
-  autocmd FileType sh,dart setlocal shiftwidth=2 tabstop=2 softtabstop=2
+  autocmd FileType c,cpp,rust,python,php,java,kotlin,gradle,groovy setlocal shiftwidth=4 tabstop=4 softtabstop=4 expandtab
+  autocmd FileType go,gomod setlocal shiftwidth=4 tabstop=4 softtabstop=4 noexpandtab
+  autocmd FileType sh,dart,yaml,json,html,css setlocal shiftwidth=2 tabstop=2 softtabstop=2 expandtab
 augroup END
 
 let g:indentLine_char = '│'
@@ -396,7 +424,7 @@ function! s:paste_relative_indent(cmd) abort
     execute 'normal! "' . v:register . a:cmd
     return
   endif
-  if &filetype =~# '^\(c\|cpp\|rust\|python\|php\|sh\|dart\|javascript\|typescript\|html\|css\|vim\|lua\|go\)$'
+  if &filetype =~# '^\(c\|cpp\|rust\|python\|php\|sh\|dart\|java\|kotlin\|gradle\|go\|yaml\|xml\|javascript\|typescript\|html\|css\|vim\|lua\)$'
     try
       execute 'normal! "' . v:register . (a:cmd ==# 'p' ? ']p' : '[p')
       return
@@ -582,11 +610,11 @@ function! s:search_everywhere_run(tab) abort
     " query> で止まらないよう、現在バッファの行検索 (BLines) を即座にfzf表示
     BLines
   elseif a:tab ==# 'type'
-    " query> を出さず、ctags または Rg で struct/enum/fn/trait 定義行を直接fzf検索
+    " query> を出さず、ctags または Rg で Rust/Go/Flutter(Dart)/Java/Python の定義行を直接fzf検索
     if !empty(tagfiles())
       Tags
     else
-      call fzf#vim#grep('rg --column --line-number --no-heading --color=always --smart-case "(^\s*(pub\s+)?(struct|enum|trait|type|fn|mod)\s+|^\s*(class|def|interface)\s+)"', 1, fzf#vim#with_preview())
+      call fzf#vim#grep('rg --column --line-number --no-heading --color=always --smart-case "(^\s*(pub\s+)?(struct|enum|trait|type|fn|func|mod)\s+|^\s*((public|private|protected|abstract|final|sealed|static|base|interface)\s+)*(class|def|interface|enum|record|mixin|extension|typedef)\s+)"', 1, fzf#vim#with_preview())
     endif
   endif
 endfunction
@@ -652,7 +680,7 @@ set pumheight=12
 
 let g:asyncomplete_auto_popup = 1
 let g:asyncomplete_min_chars = 1
-let g:asyncomplete_popup_delay = 0
+let g:asyncomplete_popup_delay = 10
 let g:lsp_text_edit_enabled = 1
 
 augroup MyAsyncompleteSources
@@ -708,12 +736,14 @@ function! s:my_asyncomplete_preprocessor(options, matches) abort
   let l:tokens = split(l:base, '\s\+')
 
   let l:source_names = sort(keys(a:matches), {a, b -> (b =~# 'lsp') - (a =~# 'lsp')})
+  let g:asyncomplete_popup_delay = 30
 
   for l:source_name in l:source_names
     let l:match_info = a:matches[l:source_name]
     let l:is_lsp = (l:source_name =~# 'lsp') ? 1 : 0
 
     for l:item in l:match_info['items']
+      if len(l:items) >= 512 | break | endif
       let l:word = get(l:item, 'word', '')
       if has_key(l:seen, l:word) | continue | endif
 
@@ -781,7 +811,7 @@ inoremap <silent><expr> <C-n>   pumvisible() ? "\<Down>" : "\<C-n>"
 inoremap <silent><expr> <C-p>   pumvisible() ? "\<Up>" : "\<C-p>"
 
 " =================================================================
-" 11. LSP & スマートジャンプ
+" 11. LSP & スマートジャンプ (Rust / Go / Flutter(Dart) / Java / C++ / Python)
 " =================================================================
 let g:NERDTreeDirArrowExpandable = '▸'
 let g:NERDTreeDirArrowCollapsible = '▾'
@@ -790,6 +820,18 @@ let g:NERDTreeShowHidden = 1
 let g:NERDTreeWinSize = 30
 
 let g:rustfmt_autosave = 1
+let g:dart_style_guide = 2
+let g:dart_format_on_save = 0 " 保存時整形はLspDocumentFormatSyncに統一
+
+" vim-flutter 連携設定 & キーバインド
+let g:flutter_command = executable('/snap/bin/flutter') ? '/snap/bin/flutter' : 'flutter'
+let g:flutter_show_log_on_run = 'split'
+let g:flutter_autoscroll = 1
+nnoremap <silent> <C-c>fr :<C-u>FlutterRun<CR>
+nnoremap <silent> <C-c>fh :<C-u>FlutterHotReload<CR>
+nnoremap <silent> <C-c>fR :<C-u>FlutterHotRestart<CR>
+nnoremap <silent> <C-c>fq :<C-u>FlutterQuit<CR>
+nnoremap <silent> <C-c>fd :<C-u>FlutterDevices<CR>
 
 let g:lsp_diagnostics_enabled = 1
 let g:lsp_diagnostics_echo_cursor = 1
@@ -810,6 +852,9 @@ let g:lsp_preview_keep_focus = 0
 let g:lsp_float_max_width = 50
 let g:lsp_float_max_height = 14
 
+" vim-lsp-settings による Dart LSP の重複起動を無効化
+let g:lsp_settings_filetype_dart = []
+
 let g:lsp_settings = {
 \   'rust-analyzer': {
 \     'workspace_config': {
@@ -818,7 +863,47 @@ let g:lsp_settings = {
 \         'completion': {'autoimport': {'enable': v:true}},
 \       }
 \     }
-\   }
+\   },
+\   'gopls': {
+\     'workspace_config': {
+\       'gopls': {
+\         'staticcheck': v:true,
+\         'completeUnimported': v:true,
+\         'usePlaceholders': v:true,
+\         'analyses': {'unusedparams': v:true, 'shadow': v:true},
+\         'hints': {
+\           'assignVariableTypes': v:true,
+\           'compositeLiteralFields': v:true,
+\           'constantValues': v:true,
+\           'functionTypeParameters': v:true,
+\           'parameterNames': v:true,
+\           'rangeVariableTypes': v:true,
+\         },
+\       }
+\     }
+\   },
+\   'analysis-server-dart-snapshot': {
+\     'workspace_config': {
+\       'dart': {
+\         'sdkPath': '/home/kotaro/snap/flutter/common/flutter/bin/cache/dart-sdk',
+\         'flutterSdkPath': '/home/kotaro/snap/flutter/common/flutter',
+\         'completeFunctionCalls': v:true,
+\         'showTodos': v:true,
+\         'enableSnippets': v:true,
+\         'updateImportsOnRename': v:true,
+\         'maxCompletionItems': 256,
+\       }
+\     }
+\   },
+\   'eclipse-jdt-ls': {
+\     'workspace_config': {
+\       'java': {
+\         'signatureHelp': {'enabled': v:true},
+\         'completion': {'favoriteStaticMembers': ['org.junit.jupiter.api.Assertions.*', 'java.util.Objects.requireNonNull']},
+\         'inlayHints': {'parameterNames': {'enabled': 'all'}},
+\       }
+\     }
+\   },
 \ }
 
 augroup MyLspSetup
@@ -854,6 +939,45 @@ augroup MyLspSetup
       \ 'name': 'taplo',
       \ 'cmd': {server_info->['taplo', 'lsp', 'stdio']},
       \ 'allowlist': ['toml'],
+      \ })
+  endif
+
+  if executable('gopls')
+    autocmd User lsp_setup call lsp#register_server({
+      \ 'name': 'gopls',
+      \ 'cmd': {server_info->['gopls']},
+      \ 'allowlist': ['go', 'gomod', 'gowork', 'gotmpl'],
+      \ 'workspace_config': g:lsp_settings['gopls']['workspace_config'],
+      \ })
+  endif
+
+  let s:dart_lsp_bin = filereadable('/home/kotaro/snap/flutter/common/flutter/bin/cache/dart-sdk/bin/dart')
+        \ ? '/home/kotaro/snap/flutter/common/flutter/bin/cache/dart-sdk/bin/dart'
+        \ : (executable('/snap/bin/dart') ? '/snap/bin/dart' : 'dart')
+  if executable(s:dart_lsp_bin)
+    autocmd User lsp_setup call lsp#register_server({
+      \ 'name': 'dart-language-server',
+      \ 'cmd': {server_info->[s:dart_lsp_bin, 'language-server', '--protocol=lsp']},
+      \ 'allowlist': ['dart'],
+      \ 'initialization_options': {
+      \   'onlyAnalyzeProjectsWithOpenFiles': v:false,
+      \   'suggestFromUnimportedLibraries': v:true,
+      \   'closingLabels': v:false,
+      \   'flutterOutline': v:false,
+      \ },
+      \ 'workspace_config': g:lsp_settings['analysis-server-dart-snapshot']['workspace_config'],
+      \ })
+  endif
+
+  if executable('jdtls')
+    autocmd User lsp_setup call lsp#register_server({
+      \ 'name': 'jdtls',
+      \ 'cmd': {server_info->[
+      \   'jdtls',
+      \   '-data', expand('~/.cache/jdtls/workspace/') . fnamemodify(getcwd(), ':t')
+      \ ]},
+      \ 'allowlist': ['java'],
+      \ 'workspace_config': g:lsp_settings['eclipse-jdt-ls']['workspace_config'],
       \ })
   endif
 augroup END
@@ -960,6 +1084,8 @@ augroup END
 
 nnoremap <silent> <C-]> :<C-u>call <SID>smart_jump_fallback()<CR>
 nnoremap <silent> <M-.> :<C-u>call <SID>smart_jump_fallback()<CR>
+nnoremap <silent> <M-,> <C-o>
+inoremap <silent> <M-,> <Esc><C-o>
 
 " =================================================================
 " 12. 自動処理 & Quickfix・辞書ウィンドウ対応 (Windowsのドライブレター対応)
@@ -977,7 +1103,7 @@ augroup MyVimrc
     \ endif
 
   autocmd BufWritePre * if &ft !=# 'markdown' | :%s/\s\+$//e | endif
-  autocmd BufWritePre *.rs,*.dart silent! LspDocumentFormatSync
+  autocmd BufWritePre *.rs,*.dart,*.go,*.java silent! LspDocumentFormatSync
 augroup END
 
 augroup MyXML
@@ -1356,6 +1482,9 @@ function! s:handle_breadcrumb_symbols(buf, tick, line, col, data) abort
 endfunction
 
 function! s:update_breadcrumbs() abort
+  if line('$') > 4096 || expand('%:p') =~# '/flutter/packages/\|/\.pub-cache/\|/dart-sdk/'
+    return
+  endif
   if &buftype !=# ''
     if !empty(s:breadcrumb_text)
       let s:breadcrumb_text = ''
@@ -1385,7 +1514,7 @@ function! s:update_breadcrumbs() abort
     return
   endif
 
-  call lsp#send_request(l:servers[0], {
+call lsp#send_request(l:servers[0], {
         \ 'method': 'textDocument/documentSymbol',
         \ 'params': {'textDocument': lsp#get_text_document_identifier()},
         \ 'on_notification': function('s:handle_breadcrumb_symbols', [bufnr('%'), l:tick, l:line, l:col]),
@@ -1404,7 +1533,24 @@ augroup ContextVisualFix
   autocmd ModeChanged [vV\x16]*:* silent! ContextEnable
 augroup END
 
-let g:context_autocmd = 'VimEnter,BufAdd,BufEnter,WinEnter,CursorHold,WinScrolled'
+let g:context_autocmd = 'BufEnter,CursorHold,BufAdd,WinScrolled'
 let g:context_max_scan_lines = 512
-let g:context_max_height = 8
+let g:context_max_height = 5
 let g:context_max_per_indent = 2
+let g:context_filetype_blacklist = ['nerdtree', 'tagbar', 'qf', 'help']
+
+" 巨大ファイルやFlutter/Dart SDKを開く前に装飾プラグインと診断を停止
+augroup FastLargeOrSdkFile
+  autocmd!
+  autocmd BufReadPre * if getfsize(expand('<afile>')) > 100000 || expand('<afile>:p') =~# '/flutter/packages/\|/\.pub-cache/\|/dart-sdk/' |
+        \ let b:gitgutter_enabled = 0 |
+        \ let b:indentLine_enabled = 0 |
+        \ let b:context_enabled = 0 |
+        \ let b:lsp_diagnostics_enabled = 0 |
+        \ setlocal nocursorline noswapfile noundofile nobuflisted readonly nomodifiable synmaxcol=120 |
+        \ endif
+  autocmd BufWinEnter,BufEnter * if get(b:, 'indentLine_enabled', 1) == 0 |
+        \ silent! IndentLinesDisable |
+        \ silent! ContextDisable |
+        \ endif
+augroup END
